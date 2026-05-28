@@ -6,6 +6,7 @@ require (
 	github.com/aws/aws-sdk-go-v2 v1.27.0
 	github.com/aws/aws-sdk-go-v2/config v1.27.0
 	github.com/aws/aws-sdk-go-v2/service/cloudwatch v1.38.0
+	github.com/joho/godotenv v1.5.1
 	github.com/temporalio/temporal-serverless-no-roads/shared v0.0.0
 	go.temporal.io/sdk v1.42.0
 	golang.org/x/time v0.5.0

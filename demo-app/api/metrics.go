@@ -26,6 +26,13 @@ type MetricsResponse struct {
 	CompletedWorkflows int64   `json:"completedWorkflows"`
 	LambdaConcurrency  float64 `json:"lambdaConcurrency"`
 	BacklogDepth       float64 `json:"backlogDepth"`
+	// SyncMatchRate is the percentage of tasks that were immediately dispatched
+	// to a polling worker (sync-matched) vs. having to wait in the backlog.
+	// 100% = every task found a waiting worker instantly, no scaling needed.
+	// As it drops, tasks are arriving faster than workers can consume them —
+	// this is the primary signal Temporal uses to trigger new Lambda invocations.
+	// -1 signals "no data yet" (no tasks have been dispatched in the window).
+	SyncMatchRate float64 `json:"syncMatchRate"`
 }
 
 // MetricsHandler fans out to Temporal and CloudWatch concurrently, merges
@@ -55,6 +62,10 @@ func MetricsHandler(
 			mu       sync.Mutex
 			response MetricsResponse
 		)
+
+		// Initialise SyncMatchRate to -1 so the frontend can distinguish
+		// "not yet measured" from a genuine 0%.
+		response.SyncMatchRate = -1
 
 		// Fan-out 1: Temporal — running and completed workflow counts.
 		wg.Add(1)
@@ -86,17 +97,19 @@ func MetricsHandler(
 			mu.Unlock()
 		}()
 
-		// Fan-out 3: Temporal — task queue backlog depth.
+		// Fan-out 3: Temporal — task queue stats (backlog depth + sync match rate).
+		// Both metrics come from a single DescribeTaskQueueEnhanced call.
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			backlog, err := fetchTaskQueueBacklog(ctx, tc)
+			backlog, syncMatchRate, err := fetchTaskQueueStats(ctx, tc)
 			if err != nil {
-				log.Printf("metrics: fetchTaskQueueBacklog: %v", err)
+				log.Printf("metrics: fetchTaskQueueStats: %v", err)
 				return
 			}
 			mu.Lock()
 			response.BacklogDepth = backlog
+			response.SyncMatchRate = syncMatchRate
 			mu.Unlock()
 		}()
 
@@ -169,16 +182,65 @@ func fetchLambdaConcurrency(ctx context.Context, cwClient *cloudwatch.Client, fu
 	return aws.ToFloat64(resp.Datapoints[0].Maximum), nil
 }
 
-// fetchTaskQueueBacklog queries Temporal task queue stats for approximate
-// backlog depth on the demo task queue.
-func fetchTaskQueueBacklog(ctx context.Context, tc client.Client) (float64, error) {
-	resp, err := tc.DescribeTaskQueue(ctx, taskqueue.DemoTaskQueue, 0)
+// fetchTaskQueueStats uses a single DescribeTaskQueueEnhanced call to return
+// both backlog depth and sync match rate.
+//
+// Backlog depth: sum of ApproximateBacklogCount across all version sets.
+//
+// Sync match rate: the percentage of tasks dispatched immediately to a polling
+// worker (sync-matched) rather than persisted to the backlog first. Derived
+// from TasksAddRate and TasksDispatchRate:
+//
+//	syncMatchRate = 1 - (BacklogIncreaseRate / TasksAddRate)
+//
+// When TasksAddRate is 0 (no activity yet), syncMatchRate is returned as -1
+// so the frontend can show a neutral "—" rather than 0% or 100%.
+//
+// This is the primary signal Temporal uses to decide whether to invoke
+// additional Lambda instances — a falling sync match rate means tasks are
+// arriving faster than workers can consume them.
+func fetchTaskQueueStats(ctx context.Context, tc client.Client) (backlog float64, syncMatchRate float64, err error) {
+	resp, err := tc.DescribeTaskQueueEnhanced(ctx, client.DescribeTaskQueueEnhancedOptions{
+		TaskQueue:   taskqueue.DemoTaskQueue,
+		ReportStats: true,
+	})
 	if err != nil {
-		return 0, err
+		return 0, -1, err
 	}
 
-	if resp.Stats != nil {
-		return float64(resp.Stats.ApproximateBacklogCount), nil
+	var (
+		totalBacklog          int64
+		totalTasksAddRate     float32
+		totalBacklogIncRate   float32
+	)
+
+	for _, versionInfo := range resp.VersionsInfo {
+		for _, typeInfo := range versionInfo.TypesInfo {
+			if typeInfo.Stats == nil {
+				continue
+			}
+			totalBacklog += typeInfo.Stats.ApproximateBacklogCount
+			totalTasksAddRate += typeInfo.Stats.TasksAddRate
+			totalBacklogIncRate += typeInfo.Stats.BacklogIncreaseRate
+		}
 	}
-	return 0, nil
+
+	backlog = float64(totalBacklog)
+
+	// Can't compute a meaningful rate if no tasks have been added yet.
+	if totalTasksAddRate <= 0 {
+		return backlog, -1, nil
+	}
+
+	// syncMatchRate = fraction of tasks that did NOT contribute to backlog growth.
+	// Clamp to [0, 100] to guard against transient metric noise.
+	rate := (1.0 - float64(totalBacklogIncRate)/float64(totalTasksAddRate)) * 100.0
+	if rate > 100.0 {
+		rate = 100.0
+	}
+	if rate < 0.0 {
+		rate = 0.0
+	}
+
+	return backlog, rate, nil
 }

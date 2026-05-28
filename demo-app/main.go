@@ -52,10 +52,17 @@ func main() {
 	// --- Routes ---
 	mux := http.NewServeMux()
 
-	// API endpoints
+	// Audience submission — rate limited per IP
 	mux.Handle("/api/submit", middleware.RateLimit(
 		http.HandlerFunc(api.SubmitHandler(temporalClient)),
 	))
+
+	// Presenter burst seeding — no rate limit, presenter use only
+	// POST /api/seed          → starts 30 workflows
+	// POST /api/seed?count=N  → starts N workflows (max 200)
+	mux.HandleFunc("/api/seed", api.SeedHandler(temporalClient))
+
+	// Metrics polling endpoint
 	mux.HandleFunc("/api/metrics", api.MetricsHandler(
 		temporalClient, cwClient, metricsCache, lambdaFunctionName,
 	))

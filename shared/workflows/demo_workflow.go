@@ -17,29 +17,41 @@ type DemoOutput struct {
 }
 
 // DemoWorkflow is the workflow that gets triggered by each audience submission.
-// It runs a short processing activity, then sleeps to keep it "running" long
-// enough to be visible on the dashboard during the webinar demo.
+//
+// It runs four activities in sequence:
+//   - ProcessSubmission: fast, constructs the greeting
+//   - SimulateWork1/2/3: each holds a worker slot for ~12 seconds (~36s total)
+//
+// Chaining three sleep activities means each workflow occupies worker capacity
+// long enough that concurrent submissions cause activity tasks to visibly queue
+// up behind busy workers, driving down sync match rate and triggering Temporal
+// to invoke additional Lambda instances.
 func DemoWorkflow(ctx workflow.Context, input DemoInput) (DemoOutput, error) {
 	logger := workflow.GetLogger(ctx)
 	logger.Info("DemoWorkflow started", "name", input.Name)
 
 	ao := workflow.ActivityOptions{
-		StartToCloseTimeout: 30 * time.Second,
+		// Must exceed the sum of all three WorkDuration constants.
+		StartToCloseTimeout: 60 * time.Second,
 	}
 	ctx = workflow.WithActivityOptions(ctx, ao)
 
-	// Step 1: run the "processing" activity
+	// Step 1: fast processing activity
 	var result string
-	err := workflow.ExecuteActivity(ctx, "ProcessSubmission", input).Get(ctx, &result)
-	if err != nil {
+	if err := workflow.ExecuteActivity(ctx, "ProcessSubmission", input).Get(ctx, &result); err != nil {
 		return DemoOutput{}, err
 	}
 
-	// Step 2: artificial sleep — keeps the workflow "running" so the dashboard
-	// shows meaningful concurrency numbers during the live demo.
-	// Tune this to match your desired demo window (default: 8 seconds).
-	err = workflow.Sleep(ctx, 8*time.Second)
-	if err != nil {
+	// Steps 2-4: chained sleep activities — each holds a worker slot, driving
+	// backlog depth and sync match rate pressure under load.
+	var workResult string
+	if err := workflow.ExecuteActivity(ctx, "SimulateWork1", input).Get(ctx, &workResult); err != nil {
+		return DemoOutput{}, err
+	}
+	if err := workflow.ExecuteActivity(ctx, "SimulateWork2", input).Get(ctx, &workResult); err != nil {
+		return DemoOutput{}, err
+	}
+	if err := workflow.ExecuteActivity(ctx, "SimulateWork3", input).Get(ctx, &workResult); err != nil {
 		return DemoOutput{}, err
 	}
 
