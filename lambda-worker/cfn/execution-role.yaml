@@ -1,0 +1,52 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Creates the Lambda execution role for the Temporal Serverless Workers demo.
+  This role is assumed by the Lambda function at runtime and needs:
+    - Basic Lambda execution permissions (CloudWatch Logs)
+    - Secrets Manager read access for Temporal Cloud mTLS credentials
+
+Parameters:
+  FunctionName:
+    Type: String
+    Default: serverless-webinar-worker
+    Description: Name of the Lambda function this role will be attached to.
+    AllowedPattern: '[a-zA-Z0-9_-]+'
+    MinLength: 1
+    MaxLength: 64
+
+Resources:
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${FunctionName}-execution-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        # Grants logs:CreateLogGroup, logs:CreateLogStream, logs:PutLogEvents
+        # which is everything needed for CloudWatch Logs output.
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: SecretsManagerReadCerts
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:temporal/serverless-webinar/*'
+
+Outputs:
+  RoleArn:
+    Description: ARN of the Lambda execution role — use this when creating the Lambda function.
+    Value: !GetAtt LambdaExecutionRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-execution-role-arn'
+
+  RoleName:
+    Description: Name of the Lambda execution role.
+    Value: !Ref LambdaExecutionRole

@@ -19,7 +19,7 @@ func main() {
 
 	lambdaworker.RunWorker(
 		worker.WorkerDeploymentVersion{
-			DeploymentName: "serverless-demo",
+			DeploymentName: "serverless-webinar",
 			BuildID:        "v1.0",
 		},
 		func(opts *lambdaworker.Options) error {

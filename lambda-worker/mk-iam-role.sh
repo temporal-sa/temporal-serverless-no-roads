@@ -14,7 +14,7 @@ EXTERNAL_ID="${2:?Usage: $0 <stack-name> <external-id> <lambda-arn>}"
 LAMBDA_ARN="${3:?Usage: $0 <stack-name> <external-id> <lambda-arn>}"
 
 # Temporal Cloud's AWS account ID — this is who assumes the role.
-TEMPORAL_AWS_ACCOUNT_ID="000000000000" # TODO: replace with Temporal Cloud's actual account ID
+TEMPORAL_AWS_ACCOUNT_ID="<your-account-id>" # TODO: replace with Temporal Cloud's actual account ID
 
 cat > /tmp/trust-policy.json <<EOF
 {

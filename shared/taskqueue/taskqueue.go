@@ -1,3 +1,3 @@
 package taskqueue
 
-const DemoTaskQueue = "serverless-demo"
+const DemoTaskQueue = "serverless-webinar"
