@@ -44,7 +44,7 @@ Temporal Cloud namespace required.
 
 ### Prerequisites
 
-- [Go 1.22+](https://go.dev/dl/)
+- [Go 1.24+](https://go.dev/dl/)
 - [Temporal CLI](https://docs.temporal.io/cli#installation)
 
 ```bash
