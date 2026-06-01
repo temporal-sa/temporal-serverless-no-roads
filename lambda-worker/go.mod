@@ -3,6 +3,9 @@ module github.com/temporalio/temporal-serverless-no-roads/lambda-worker
 go 1.24.0
 
 require (
+	github.com/aws/aws-sdk-go-v2 v1.27.0
+	github.com/aws/aws-sdk-go-v2/config v1.27.0
+	github.com/aws/aws-sdk-go-v2/service/secretsmanager v1.28.0
 	github.com/temporalio/temporal-serverless-no-roads/shared v0.0.0
 	go.temporal.io/sdk v1.42.0
 	go.temporal.io/sdk/contrib/aws/lambdaworker v0.1.1

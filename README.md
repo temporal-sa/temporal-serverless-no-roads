@@ -12,20 +12,18 @@ temporal-serverless-no-roads/
 │   ├── activities/            # ProcessSubmission + SimulateWork1/2/3 activity implementations
 │   ├── taskqueue/             # Shared task queue name constant
 │   ├── workerconfig/          # Reads worker concurrency from environment variables
+│   │   └── .env               # Worker concurrency settings for local dev/to invoke for the Lambda
 │   └── workflows/             # DemoWorkflow definition
 ├── lambda-worker/             # Deployable 1: Lambda worker (Go)
 │   ├── cfn/
 │   │   └── execution-role.yaml    # CloudFormation: Lambda execution role (CloudWatch + Secrets Manager)
 │   ├── deploy-lambda.sh       # Build, package, create-or-update Lambda function
 │   ├── Makefile               # Orchestrates cfn-execution-role → deploy
-│   ├── temporal.toml          # Temporal Cloud connection config (update before deploying)
-│   └── .env                   # Documents Lambda environment variables (not bundled in zip)
 ├── demo-app/                  # Deployable 2: HTTP server — UI + API (Go)
 │   ├── api/                   # /api/submit, /api/metrics, /api/seed handlers
 │   ├── cache/                 # Short-TTL metrics cache
 │   ├── frontend/              # Embedded HTML UI (served at /)
 │   ├── localworker/           # Long-polling worker for local dev (not deployed to Lambda)
-│   │   └── .env               # Worker concurrency settings for local dev
 │   ├── middleware/            # Per-IP rate limiter
 │   └── k8s/                   # Kubernetes manifests for EKS deployment
 ├── go.work                    # Go workspace — ties all three modules together
@@ -34,7 +32,7 @@ temporal-serverless-no-roads/
 
 > Note: `cfn/temporal-invoke-role.yaml` has been removed. The Temporal Cloud UI
 > provides its own CloudFormation template for the invocation role as part of
-> the worker deployment creation flow (Step 6).
+> the worker deployment creation flow (Step 5).
 
 ---
 
@@ -142,46 +140,53 @@ Or activate presenter mode in the UI (`?presenter=1` in the URL, or
 This section covers the complete end-to-end process for deploying the Lambda
 worker to the SA AWS account and connecting it to Temporal Cloud.
 
+> **Namespace auth requirement:** your Temporal Cloud namespace must be
+> configured for **API key authentication**. mTLS and API key auth are mutually
+> exclusive per namespace in Temporal Cloud — you cannot mix them.
+
 ### Prerequisites
 
 - A Temporal Cloud namespace with mTLS client cert and key. Download them from
-  the Temporal Cloud UI under your namespace → **Certificates**.
+  the Temporal Cloud UI under your
+  namespace → **API Keys**.
 
 - Temporal CLI installed (`brew install temporal`).
 
-### Step 1 — Store Temporal credentials in Secrets Manager
+### Step 1 — Store the Temporal API key in Secrets Manager
 
-Store your mTLS cert and key so the Lambda can read them at startup without
-bundling secrets in the deployment zip.
+Store your API key so the Lambda can fetch it at cold start without it being
+visible in plain text as an environment variable.
 
-### Step 2 — Update `temporal.toml`
-
-Edit `lambda-worker/temporal.toml` with your Temporal Cloud namespace address:
-
-```toml
-[profile.default]
-address   = "<your-namespace>.<account-id>.tmprl.cloud:7233"
-namespace = "<your-namespace>.<account-id>"
-
-[profile.default.tls]
-client-cert = "/tmp/client.pem"
-client-key  = "/tmp/client.key"
+```bash
+aws secretsmanager create-secret \
+  --name temporal/serverless-webinar/api-key \
+  --secret-string "<your-temporal-api-key>" \
+  --region us-east-1 \
+  --profile <your-profile>
 ```
 
-### Step 3 — Deploy the Lambda execution role (CloudFormation)
+> To update the secret on subsequent runs, use `put-secret-value` instead of
+> `create-secret`.
+>
+> **Simpler alternative for demos:** skip this step and set `TEMPORAL_API_KEY`
+> directly as a Lambda environment variable in Step 4. The key is visible in
+> the Lambda console, which is fine for a short-lived demo but not for
+> production.
 
-Creates the IAM execution role that the Lambda function assumes at runtime. This
-role grants CloudWatch Logs write access and Secrets Manager read access for the
-Temporal credentials stored in Step 1.
+### Step 2 — Deploy the Lambda execution role (CloudFormation)
+
+Creates the IAM execution role the Lambda function assumes at runtime. Grants
+CloudWatch Logs write access and Secrets Manager read access for the API key
+stored in Step 1.
 
 ```bash
 cd lambda-worker
 make cfn-execution-role
 ```
 
-Prints the role ARN when complete. Copy it — you need it in Step 4.
+Prints the role ARN when complete. Copy it — you need it in Step 3.
 
-### Step 4 — Create the Lambda function and deploy worker code
+### Step 3 — Create the Lambda function and deploy worker code
 
 On first run this creates the Lambda function; on subsequent runs it updates the
 code only.
@@ -191,29 +196,48 @@ make deploy \
   EXECUTION_ROLE=arn:aws:iam::<your-aws-account-id>:role/serverless-webinar-worker-execution-role
 ```
 
-This cross-compiles the Go binary for `linux/amd64`, zips it with
-`temporal.toml`, creates (or updates) the Lambda function with a 600-second
-timeout and 256 MB memory, and sets the worker concurrency environment variables.
+This cross-compiles the Go binary for `linux/amd64`, packages it, and creates
+(or updates) the Lambda function with a 600-second timeout and 256 MB memory.
 
-Note the **Lambda ARN** printed in the output — you need it in Step 6.
+Note the **Lambda ARN** printed in the output — you need it in Step 5.
 
-### Step 5 — Set Lambda environment variables
+### Step 4 — Set Lambda environment variables
 
-Worker concurrency is controlled by environment variables. Update them on the
-deployed function:
+Set the Temporal connection config and credentials on the deployed function. Use
+Option A or Option B for the API key depending on what you chose in Step 1.
 
 ```bash
+# Option A: API key stored directly as an env var (simpler, fine for demos)
 aws lambda update-function-configuration \
   --function-name serverless-webinar-worker \
-  --environment "Variables={WORKER_MAX_CONCURRENT_ACTIVITIES=5,WORKER_MAX_CONCURRENT_WORKFLOWS=5}" \
+  --environment "Variables={
+    TEMPORAL_ADDRESS=<your-namespace>.<account-id>.tmprl.cloud:7233,
+    TEMPORAL_NAMESPACE=<your-namespace>.<account-id>,
+    TEMPORAL_API_KEY=<your-temporal-api-key>,
+    WORKER_MAX_CONCURRENT_ACTIVITIES=5,
+    WORKER_MAX_CONCURRENT_WORKFLOWS=5
+  }" \
+  --region us-east-1 \
+  --profile <your-profile>
+
+# Option B: API key fetched from Secrets Manager at cold start (recommended)
+aws lambda update-function-configuration \
+  --function-name serverless-webinar-worker \
+  --environment "Variables={
+    TEMPORAL_ADDRESS=<your-namespace>.<account-id>.tmprl.cloud:7233,
+    TEMPORAL_NAMESPACE=<your-namespace>.<account-id>,
+    TEMPORAL_API_KEY_SECRET_ARN=arn:aws:secretsmanager:us-east-1:<your-aws-account-id>:secret:temporal/serverless-webinar/api-key-<suffix>,
+    WORKER_MAX_CONCURRENT_ACTIVITIES=5,
+    WORKER_MAX_CONCURRENT_WORKFLOWS=5
+  }" \
   --region us-east-1 \
   --profile <your-profile>
 ```
 
-See the [Configuration reference](#configuration-reference) section for tuning
-guidance.
+See the [Configuration reference](#configuration-reference) section for
+concurrency tuning guidance.
 
-### Step 6 — Create the worker deployment in Temporal Cloud
+### Step 5 — Create the worker deployment in Temporal Cloud
 
 This step is done entirely in the Temporal Cloud UI. It wires the Lambda ARN to
 Temporal and creates the IAM role Temporal uses to invoke it.
@@ -224,7 +248,7 @@ Temporal and creates the IAM role Temporal uses to invoke it.
    - **Name**: `serverless-webinar`
    - **Build ID**: `1.0.0`
    - **Compute**: AWS Lambda
-   - **Lambda ARN**: the ARN from Step 4
+   - **Lambda ARN**: the ARN from Step 3
 4. The right panel shows a CloudFormation template. Deploy it to create the IAM
    role that Temporal Cloud uses to invoke your Lambda:
    - Copy or download the template from the UI
@@ -248,7 +272,7 @@ Temporal and creates the IAM role Temporal uses to invoke it.
 After creation, Temporal Cloud will invoke your Lambda automatically whenever
 workflows are started on the `serverless-webinar` task queue.
 
-### Step 7 — Verify
+### Step 6 — Verify
 
 Start a test workflow to confirm end-to-end connectivity:
 
@@ -259,8 +283,7 @@ temporal workflow start \
   --input '{"name":"test"}' \
   --address <your-namespace>.<account-id>.tmprl.cloud:7233 \
   --namespace <your-namespace>.<account-id> \
-  --tls-cert-path /path/to/client.pem \
-  --tls-key-path /path/to/client.key
+  --api-key <your-temporal-api-key>
 ```
 
 Check the Temporal Cloud UI for the running workflow and the AWS Lambda console
@@ -271,13 +294,12 @@ correctly.
 
 | Step | What it does |
 |---|---|
-| 1 | Store mTLS certs in Secrets Manager |
-| 2 | Update `temporal.toml` with namespace address |
-| 3 | `make cfn-execution-role` — Lambda execution role |
-| 4 | `make deploy EXECUTION_ROLE=...` — create Lambda + upload code |
-| 5 | `aws lambda update-function-configuration` — set concurrency env vars |
-| 6 | Temporal Cloud UI — deploy CFN template, create worker deployment |
-| 7 | `temporal workflow start` — end-to-end smoke test |
+| 1 | Store Temporal API key in Secrets Manager |
+| 2 | `make cfn-execution-role` — Lambda execution role |
+| 3 | `make deploy EXECUTION_ROLE=...` — create Lambda + upload code |
+| 4 | `aws lambda update-function-configuration` — set env vars |
+| 5 | Temporal Cloud UI — deploy CFN template, create worker deployment |
+| 6 | `temporal workflow start` — end-to-end smoke test |
 
 ### Redeploying after code changes
 
@@ -321,12 +343,13 @@ docker push <your-aws-account-id>.dkr.ecr.us-east-1.amazonaws.com/serverless-web
 
 ### 2. Create the Temporal credentials Secret
 
+The demo app connects to Temporal Cloud using an API key:
+
 ```bash
 kubectl create secret generic temporal-credentials \
   --from-literal=address='<your-namespace>.<account-id>.tmprl.cloud:7233' \
   --from-literal=namespace='<your-namespace>.<account-id>' \
-  --from-file=tls-cert=/path/to/client.pem \
-  --from-file=tls-key=/path/to/client.key
+  --from-literal=api-key='<your-temporal-api-key>'
 ```
 
 ### 3. Create the IRSA role for CloudWatch access
@@ -402,22 +425,41 @@ scaling visuals before or during the audience participation moment.
 
 ## Configuration reference
 
-### Worker concurrency environment variables
+### Lambda worker environment variables
 
-Both the local worker and the Lambda worker share the same variables via
-`shared/workerconfig`. The startup log always prints the values in use.
-
-| Variable | Default | Description |
+| Variable | Required | Description |
 |---|---|---|
-| `WORKER_MAX_CONCURRENT_ACTIVITIES` | `5` | Max activity tasks per worker instance |
-| `WORKER_MAX_CONCURRENT_WORKFLOWS` | `5` | Max workflow tasks per worker instance |
+| `TEMPORAL_ADDRESS` | Yes | Temporal Cloud gRPC endpoint (`<namespace>.<account>.tmprl.cloud:7233`) |
+| `TEMPORAL_NAMESPACE` | Yes | Temporal namespace ID (`<namespace>.<account>`) |
+| `TEMPORAL_API_KEY` | Either/or | API key value directly (Option A) |
+| `TEMPORAL_API_KEY_SECRET_ARN` | Either/or | Secrets Manager ARN to fetch the key from at cold start (Option B) |
+| `WORKER_MAX_CONCURRENT_ACTIVITIES` | No | Max activity tasks per invocation (default: `5`) |
+| `WORKER_MAX_CONCURRENT_WORKFLOWS` | No | Max workflow tasks per invocation (default: `5`) |
 
-**Local worker** — loaded from `demo-app/localworker/.env`. Shell environment
-takes precedence.
+The `.env` file in `lambda-worker/` documents all variables but is not bundled
+in the deployment zip.
 
-**Lambda worker** — set as Lambda function environment variables. The `.env`
-file in `lambda-worker/` documents them but is not bundled in the deployment
-zip. `make deploy` sets defaults at function creation; update with:
+### Demo app environment variables
+
+| Variable | Required | Description |
+|---|---|---|
+| `LAMBDA_FUNCTION_NAME` | Yes | Lambda function name for CloudWatch metrics lookup |
+| `TEMPORAL_ADDRESS` | No | Temporal server address (default: `localhost:7233`) |
+| `TEMPORAL_NAMESPACE` | No | Temporal namespace (default: `default`) |
+| `TEMPORAL_API_KEY` | No | Temporal Cloud API key |
+
+### Worker concurrency tuning
+
+Both the local worker and the Lambda worker read `WORKER_MAX_CONCURRENT_ACTIVITIES`
+and `WORKER_MAX_CONCURRENT_WORKFLOWS` via `shared/workerconfig`. The startup log
+always prints the values in use.
+
+With `WORKER_MAX_CONCURRENT_ACTIVITIES=5` and each `SimulateWork` activity
+sleeping for 12 seconds, the worker saturates at 5 concurrent workflows. A seed
+burst of 30 immediately queues 25 activity tasks, driving the sync match rate
+down and triggering Lambda scaling.
+
+To update the values on the deployed Lambda:
 
 ```bash
 aws lambda update-function-configuration \
@@ -427,25 +469,10 @@ aws lambda update-function-configuration \
   --profile <your-profile>
 ```
 
-### Demo app environment variables
+### Activity sleep durations
 
-| Variable | Required | Description |
-|---|---|---|
-| `LAMBDA_FUNCTION_NAME` | Yes | Lambda function name for CloudWatch metrics lookup |
-| `TEMPORAL_ADDRESS` | No | Temporal server address (default: `localhost:7233`) |
-| `TEMPORAL_NAMESPACE` | No | Temporal namespace (default: `default`) |
-| `TEMPORAL_TLS_CERT` | No | Path to mTLS client cert (Temporal Cloud) |
-| `TEMPORAL_TLS_KEY` | No | Path to mTLS client key (Temporal Cloud) |
-
-### Tuning the demo
-
-**Worker concurrency** is the primary lever for how quickly backlog builds. With
-`WORKER_MAX_CONCURRENT_ACTIVITIES=5` and each `SimulateWork` activity sleeping
-for 12 seconds, the worker saturates at 5 concurrent workflows. A seed burst of
-30 immediately queues 25 activity tasks, driving the sync match rate down.
-
-**Activity sleep durations** control how long each workflow holds worker
-capacity. Edit the constants in `shared/activities/demo_activities.go`:
+Control how long each workflow holds worker capacity. Edit the constants in
+`shared/activities/demo_activities.go`:
 
 ```go
 const (
@@ -459,10 +486,6 @@ Each workflow chains all three sequentially (~36 seconds total worker
 occupancy). `StartToCloseTimeout` in `shared/workflows/demo_workflow.go` must
 always exceed the sum of all three.
 
-**Lambda timeout** — the function is created with a 600-second timeout. This
-must be longer than the longest single activity execution plus the graceful
-shutdown window. The current activity chain (36 seconds) is well within this
-limit.
-
-**Lambda memory** — set to 256 MB at creation. Increase if you observe memory
-pressure in CloudWatch Logs.
+**Lambda timeout** is set to 600 seconds at creation — well above the 36-second
+activity chain. **Lambda memory** is set to 256 MB; increase if you observe
+memory pressure in CloudWatch Logs.

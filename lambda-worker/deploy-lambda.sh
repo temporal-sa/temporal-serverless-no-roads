@@ -3,27 +3,20 @@
 # it with config files, and creates or updates the Lambda function.
 #
 # Usage:
-#   ./deploy-lambda.sh <function-name> <execution-role-arn> [region]
+#   ./deploy-lambda.sh <function-name> [execution-role-arn] [region]
 #
 #   function-name:        Name for the Lambda function (e.g. serverless-demo-worker)
 #   execution-role-arn:   ARN of the execution role (output of cfn/execution-role.yaml)
+#                         Required only when creating the function for the first time.
 #   region:               AWS region (default: us-east-1)
 #
-# On first run, this script creates the Lambda function.
-# On subsequent runs, it updates the function code only.
-#
-# Prerequisites:
-#   - AWS CLI configured with <your-profile> profile
-#     (see README — use `access account --aws-account-id 429214323166 --write`)
-#   - Temporal Cloud mTLS certs stored in AWS Secrets Manager at:
-#       temporal/serverless-demo/client-cert  (PEM)
-#       temporal/serverless-demo/client-key   (PEM)
-#   - temporal.toml updated with your namespace address
+# On first run, this script creates the Lambda function (execution-role-arn required).
+# On subsequent runs, it updates the function code only (execution-role-arn not needed).
 
 set -euo pipefail
 
-FUNCTION_NAME="${1:?Usage: $0 <function-name> <execution-role-arn> [region]}"
-EXECUTION_ROLE_ARN="${2:?Usage: $0 <function-name> <execution-role-arn> [region]}"
+FUNCTION_NAME="${1:?Usage: $0 <function-name> [execution-role-arn] [region]}"
+EXECUTION_ROLE_ARN="${2:-}"
 REGION="${3:-us-east-1}"
 AWS_PROFILE="${AWS_PROFILE:-<your-profile>}"
 BUILD_DIR="$(mktemp -d)"
@@ -34,9 +27,8 @@ GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
   go build -o "${BUILD_DIR}/bootstrap" .
 
 echo "Packaging..."
-cp temporal.toml "${BUILD_DIR}/temporal.toml"
 cd "${BUILD_DIR}"
-zip -j "${ZIP_PATH}" bootstrap temporal.toml
+zip -j "${ZIP_PATH}" bootstrap
 cd - > /dev/null
 
 # Check whether the function already exists
@@ -50,6 +42,11 @@ if aws lambda get-function \
 fi
 
 if [ "${FUNCTION_EXISTS}" = "false" ]; then
+  if [ -z "${EXECUTION_ROLE_ARN}" ]; then
+    echo "Error: <execution-role-arn> is required when creating a new Lambda function." >&2
+    echo "Usage: $0 <function-name> <execution-role-arn> [region]" >&2
+    exit 1
+  fi
   echo "Creating Lambda function: ${FUNCTION_NAME}..."
   FUNCTION_ARN=$(aws lambda create-function \
     --function-name "${FUNCTION_NAME}" \

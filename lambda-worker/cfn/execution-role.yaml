@@ -3,7 +3,9 @@ Description: >
   Creates the Lambda execution role for the Temporal Serverless Workers demo.
   This role is assumed by the Lambda function at runtime and needs:
     - Basic Lambda execution permissions (CloudWatch Logs)
-    - Secrets Manager read access for Temporal Cloud mTLS credentials
+    - Secrets Manager read access for the Temporal Cloud API key
+      (only required if using TEMPORAL_API_KEY_SECRET_ARN rather than
+      setting TEMPORAL_API_KEY directly as a Lambda environment variable)
 
 Parameters:
   FunctionName:
@@ -28,10 +30,9 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         # Grants logs:CreateLogGroup, logs:CreateLogStream, logs:PutLogEvents
-        # which is everything needed for CloudWatch Logs output.
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       Policies:
-        - PolicyName: SecretsManagerReadCerts
+        - PolicyName: SecretsManagerReadApiKey
           PolicyDocument:
             Version: '2012-10-17'
             Statement:

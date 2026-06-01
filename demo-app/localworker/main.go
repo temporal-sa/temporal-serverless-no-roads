@@ -3,9 +3,9 @@ package main
 import (
 	"log"
 
-	"github.com/joho/godotenv"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/worker"
+	"go.temporal.io/sdk/workflow"
 
 	"github.com/temporalio/temporal-serverless-no-roads/shared/activities"
 	"github.com/temporalio/temporal-serverless-no-roads/shared/taskqueue"
@@ -14,18 +14,13 @@ import (
 )
 
 func main() {
-	// Load .env if present — silently ignored if missing (e.g. env vars are
-	// already set in the shell or in a container environment).
-	if err := godotenv.Load(); err != nil {
-		log.Println("localworker: no .env file found, using environment variables")
-	}
-
+	// workerconfig's init() automatically loads shared/workerconfig/.env via
+	// runtime.Caller, so no explicit env-file handling is needed here.
+	// In containerised or Lambda deployments the env vars are injected
+	// directly and no .env file is expected.
 	cfg := workerconfig.Load()
 
-	c, err := client.Dial(client.Options{
-		// Defaults to localhost:7233 / namespace "default" — matches
-		// what `temporal server start-dev` provides out of the box.
-	})
+	c, err := client.Dial(workerconfig.BuildClientOptions())
 	if err != nil {
 		log.Fatalln("failed to create Temporal client:", err)
 	}
@@ -34,6 +29,16 @@ func main() {
 	w := worker.New(c, taskqueue.DemoTaskQueue, worker.Options{
 		MaxConcurrentActivityExecutionSize:     cfg.MaxConcurrentActivityExecutionSize,
 		MaxConcurrentWorkflowTaskExecutionSize: cfg.MaxConcurrentWorkflowTaskExecutionSize,
+		// Match the versioning config used by the Lambda worker so local dev
+		// behaviour is consistent with production.
+		DeploymentOptions: worker.DeploymentOptions{
+			UseVersioning:             true,
+			DefaultVersioningBehavior: workflow.VersioningBehaviorPinned,
+			Version: worker.WorkerDeploymentVersion{
+				DeploymentName: "serverless-webinar",
+				BuildID:        "1.0.0",
+			},
+		},
 	})
 	w.RegisterWorkflow(workflows.DemoWorkflow)
 	w.RegisterActivity(&activities.Activities{})
