@@ -343,7 +343,9 @@ docker push <your-aws-account-id>.dkr.ecr.us-east-1.amazonaws.com/serverless-web
 
 ### 2. Create the Temporal credentials Secret
 
-The demo app connects to Temporal Cloud using an API key:
+The demo app reads `TEMPORAL_ADDRESS`, `TEMPORAL_NAMESPACE`, and
+`TEMPORAL_API_KEY` from environment variables at startup (via
+`workerconfig.BuildClientOptions()`). Store them in a k8s Secret:
 
 ```bash
 kubectl create secret generic temporal-credentials \
@@ -391,21 +393,42 @@ aws iam put-role-policy \
   --profile <your-profile>
 ```
 
-### 4. Update k8s manifests and apply
+### 4. Update the k8s manifests
 
-Update `demo-app/k8s/deployment.yaml` with your ECR image URI and Lambda
-function name. Update `demo-app/k8s/service.yaml` with your IRSA role ARN.
-Then apply:
+Two placeholders need filling in before you apply:
+
+**`demo-app/k8s/deployment.yaml`** — replace the ECR image URI:
+```yaml
+image: <your-aws-account-id>.dkr.ecr.us-east-1.amazonaws.com/serverless-webinar-app:latest
+```
+
+**`demo-app/k8s/service.yaml`** — replace the IRSA role ARN:
+```yaml
+eks.amazonaws.com/role-arn: arn:aws:iam::<your-aws-account-id>:role/demo-app-cloudwatch-role
+```
+
+All other values (`LAMBDA_FUNCTION_NAME`, secret key names, container port) are
+already correct.
+
+### 5. Apply
 
 ```bash
 kubectl apply -f demo-app/k8s/
 ```
 
-The demo app will be accessible via the ALB Ingress URL printed by:
+Check rollout status:
+
+```bash
+kubectl rollout status deployment/demo-app
+```
+
+Get the ALB URL once the ingress is provisioned (may take a minute):
 
 ```bash
 kubectl get ingress demo-app
 ```
+
+The demo app will be available at the `ADDRESS` shown in that output.
 
 ---
 

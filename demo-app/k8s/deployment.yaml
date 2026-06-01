@@ -14,15 +14,15 @@ spec:
       labels:
         app: demo-app
     spec:
-      serviceAccountName: demo-app  # IRSA — annotated below in serviceaccount.yaml
+      serviceAccountName: demo-app  # IRSA — annotated in service.yaml
       containers:
         - name: demo-app
-          image: <your-ecr-repo>/demo-app:latest
+          image: <your-aws-account-id>.dkr.ecr.us-east-1.amazonaws.com/serverless-webinar-app:latest
           ports:
             - containerPort: 8080
           env:
             - name: LAMBDA_FUNCTION_NAME
-              value: "serverless-demo-worker"  # TODO: update to your Lambda function name
+              value: "serverless-webinar-worker"
             - name: TEMPORAL_ADDRESS
               valueFrom:
                 secretKeyRef:
@@ -33,16 +33,11 @@ spec:
                 secretKeyRef:
                   name: temporal-credentials
                   key: namespace
-            - name: TEMPORAL_TLS_CERT
+            - name: TEMPORAL_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: temporal-credentials
-                  key: tls-cert
-            - name: TEMPORAL_TLS_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: temporal-credentials
-                  key: tls-key
+                  key: api-key
           resources:
             requests:
               cpu: "100m"

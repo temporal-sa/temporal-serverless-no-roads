@@ -16,6 +16,7 @@ import (
 	"github.com/temporalio/temporal-serverless-no-roads/demo-app/api"
 	"github.com/temporalio/temporal-serverless-no-roads/demo-app/cache"
 	"github.com/temporalio/temporal-serverless-no-roads/demo-app/middleware"
+	"github.com/temporalio/temporal-serverless-no-roads/shared/workerconfig"
 )
 
 //go:embed frontend/*
@@ -23,11 +24,10 @@ var frontendFS embed.FS
 
 func main() {
 	// --- Temporal client ---
-	temporalClient, err := client.Dial(client.Options{
-		// Connection config is loaded from TEMPORAL_ADDRESS, TEMPORAL_NAMESPACE,
-		// and TEMPORAL_TLS_* environment variables (or temporal.toml if present).
-		// Set these in your k8s deployment via Secret/ConfigMap.
-	})
+	// Reads TEMPORAL_ADDRESS, TEMPORAL_NAMESPACE, and TEMPORAL_API_KEY from
+	// environment variables. Falls back to localhost:7233 / default namespace
+	// with no auth when env vars are absent (local dev).
+	temporalClient, err := client.Dial(workerconfig.BuildClientOptions())
 	if err != nil {
 		log.Fatalf("failed to create Temporal client: %v", err)
 	}
