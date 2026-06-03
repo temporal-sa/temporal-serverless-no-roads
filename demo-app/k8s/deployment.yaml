@@ -23,6 +23,8 @@ spec:
           env:
             - name: LAMBDA_FUNCTION_NAME
               value: "serverless-webinar-worker"
+            - name: LAMBDA_REGION
+              value: "us-east-1"  
             - name: TEMPORAL_ADDRESS
               valueFrom:
                 secretKeyRef:

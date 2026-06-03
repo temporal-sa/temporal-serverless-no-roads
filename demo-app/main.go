@@ -34,7 +34,18 @@ func main() {
 	defer temporalClient.Close()
 
 	// --- AWS CloudWatch client (uses IRSA in EKS — no static creds needed) ---
-	awsCfg, err := awsconfig.LoadDefaultConfig(context.Background())
+	// CloudWatch is regional — the client must be pointed at the region where
+	// the Lambda function runs, which may differ from the region the demo app
+	// is deployed in. Set LAMBDA_REGION to the Lambda's region.
+	lambdaRegion := os.Getenv("LAMBDA_REGION")
+	if lambdaRegion == "" {
+		log.Println("LAMBDA_REGION not set, falling back to AWS_DEFAULT_REGION / instance metadata")
+	}
+	awsCfgOpts := []func(*awsconfig.LoadOptions) error{}
+	if lambdaRegion != "" {
+		awsCfgOpts = append(awsCfgOpts, awsconfig.WithRegion(lambdaRegion))
+	}
+	awsCfg, err := awsconfig.LoadDefaultConfig(context.Background(), awsCfgOpts...)
 	if err != nil {
 		log.Fatalf("failed to load AWS config: %v", err)
 	}
