@@ -1,16 +1,12 @@
 package main
 
 import (
-	"context"
 	"embed"
 	"io/fs"
 	"log"
 	"net/http"
-	"os"
 	"time"
 
-	awsconfig "github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/service/cloudwatch"
 	"go.temporal.io/sdk/client"
 
 	"github.com/temporalio/temporal-serverless-no-roads/demo-app/api"
@@ -33,32 +29,11 @@ func main() {
 	}
 	defer temporalClient.Close()
 
-	// --- AWS CloudWatch client (uses IRSA in EKS — no static creds needed) ---
-	// CloudWatch is regional — the client must be pointed at the region where
-	// the Lambda function runs, which may differ from the region the demo app
-	// is deployed in. Set LAMBDA_REGION to the Lambda's region.
-	lambdaRegion := os.Getenv("LAMBDA_REGION")
-	if lambdaRegion == "" {
-		log.Println("LAMBDA_REGION not set, falling back to AWS_DEFAULT_REGION / instance metadata")
-	}
-	awsCfgOpts := []func(*awsconfig.LoadOptions) error{}
-	if lambdaRegion != "" {
-		awsCfgOpts = append(awsCfgOpts, awsconfig.WithRegion(lambdaRegion))
-	}
-	awsCfg, err := awsconfig.LoadDefaultConfig(context.Background(), awsCfgOpts...)
-	if err != nil {
-		log.Fatalf("failed to load AWS config: %v", err)
-	}
-	cwClient := cloudwatch.NewFromConfig(awsCfg)
-
-	// --- Lambda function name (set via env var in k8s deployment) ---
-	lambdaFunctionName := os.Getenv("LAMBDA_FUNCTION_NAME")
-	if lambdaFunctionName == "" {
-		log.Fatal("LAMBDA_FUNCTION_NAME env var is required")
-	}
-
-	// --- Metrics cache: 3 second TTL ---
-	metricsCache := cache.NewMetricsCache(3 * time.Second)
+	// --- Metrics cache: 2 second TTL ---
+	// Lambda concurrency is now sourced from Temporal's live poller count
+	// (via DescribeTaskQueue) rather than CloudWatch, so a 2s TTL is
+	// appropriate — all metrics are now in the same freshness tier.
+	metricsCache := cache.NewMetricsCache(2 * time.Second)
 
 	// --- Routes ---
 	mux := http.NewServeMux()
@@ -75,7 +50,7 @@ func main() {
 
 	// Metrics polling endpoint
 	mux.HandleFunc("/api/metrics", api.MetricsHandler(
-		temporalClient, cwClient, metricsCache, lambdaFunctionName,
+		temporalClient, metricsCache,
 	))
 
 	// Serve embedded frontend — strip the "frontend/" prefix from embed paths

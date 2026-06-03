@@ -3,17 +3,12 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"log"
 	"net/http"
 	"os"
 	"sync"
 	"time"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/service/cloudwatch"
-	cwtypes "github.com/aws/aws-sdk-go-v2/service/cloudwatch/types"
-	"github.com/aws/smithy-go"
 	enumspb "go.temporal.io/api/enums/v1"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	"go.temporal.io/api/workflowservice/v1"
@@ -27,6 +22,10 @@ import (
 type MetricsResponse struct {
 	RunningWorkflows   int64   `json:"runningWorkflows"`
 	CompletedWorkflows int64   `json:"completedWorkflows"`
+	// LambdaConcurrency is the number of active Lambda invocations, derived
+	// from the count of live pollers on the activity task queue. Each Lambda
+	// invocation registers exactly one activity-task poller, so this count is
+	// real-time (seconds of lag) rather than relying on CloudWatch (1-3 min lag).
 	LambdaConcurrency  float64 `json:"lambdaConcurrency"`
 	BacklogDepth       float64 `json:"backlogDepth"`
 	// SyncMatchRate is the percentage of tasks that were immediately dispatched
@@ -38,14 +37,12 @@ type MetricsResponse struct {
 	SyncMatchRate float64 `json:"syncMatchRate"`
 }
 
-// MetricsHandler fans out to Temporal and CloudWatch concurrently, merges
-// results, and returns JSON. Responses are cached for a short TTL to avoid
-// hammering both APIs when many browser tabs are polling simultaneously.
+// MetricsHandler fans out to Temporal concurrently, merges results, and
+// returns JSON. Responses are cached for a short TTL to avoid hammering the
+// Temporal APIs when many browser tabs are polling simultaneously.
 func MetricsHandler(
 	tc client.Client,
-	cwClient *cloudwatch.Client,
 	metricsCache *cache.MetricsCache,
-	lambdaFunctionName string,
 ) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -85,27 +82,13 @@ func MetricsHandler(
 			mu.Unlock()
 		}()
 
-		// Fan-out 2: CloudWatch — Lambda concurrent executions.
-		// Degrades gracefully to 0 when running locally without AWS credentials.
+		// Fan-out 2: Temporal — task queue stats (backlog depth, sync match rate,
+		// and active Lambda poller count). Uses two DescribeTaskQueue calls
+		// (workflow + activity) with ReportStats: true.
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			concurrency, err := fetchLambdaConcurrency(ctx, cwClient, lambdaFunctionName)
-			if err != nil {
-				log.Printf("metrics: fetchLambdaConcurrency: %v", err)
-				return
-			}
-			mu.Lock()
-			response.LambdaConcurrency = concurrency
-			mu.Unlock()
-		}()
-
-		// Fan-out 3: Temporal — task queue stats (backlog depth + sync match rate).
-		// Uses two DescribeTaskQueue calls (workflow + activity) with ReportStats: true.
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			backlog, syncMatchRate, err := fetchTaskQueueStats(ctx, tc)
+			backlog, syncMatchRate, pollerCount, err := fetchTaskQueueStats(ctx, tc)
 			if err != nil {
 				log.Printf("metrics: fetchTaskQueueStats: %v", err)
 				return
@@ -113,6 +96,7 @@ func MetricsHandler(
 			mu.Lock()
 			response.BacklogDepth = backlog
 			response.SyncMatchRate = syncMatchRate
+			response.LambdaConcurrency = float64(pollerCount)
 			mu.Unlock()
 		}()
 
@@ -144,57 +128,10 @@ func fetchTemporalWorkflowCounts(ctx context.Context, tc client.Client) (running
 	return runningResp.Count, completedResp.Count, nil
 }
 
-// fetchLambdaConcurrency queries CloudWatch for the ConcurrentExecutions metric
-// over the last 60 seconds. Returns 0, nil when running locally without AWS
-// credentials so the rest of the metrics response is unaffected.
-func fetchLambdaConcurrency(ctx context.Context, cwClient *cloudwatch.Client, functionName string) (float64, error) {
-	now := time.Now()
-	resp, err := cwClient.GetMetricStatistics(ctx, &cloudwatch.GetMetricStatisticsInput{
-		Namespace:  aws.String("AWS/Lambda"),
-		MetricName: aws.String("ConcurrentExecutions"),
-		Dimensions: []cwtypes.Dimension{
-			{
-				Name:  aws.String("FunctionName"),
-				Value: aws.String(functionName),
-			},
-		},
-		StartTime:  aws.Time(now.Add(-5 * time.Minute)),
-		EndTime:    aws.Time(now),
-		Period:     aws.Int32(60),
-		Statistics: []cwtypes.Statistic{cwtypes.StatisticMaximum},
-	})
-	if err != nil {
-		// Treat missing/invalid credentials as a graceful zero — expected in
-		// local dev where no AWS credentials are configured.
-		var ae smithy.APIError
-		if errors.As(err, &ae) &&
-			(ae.ErrorCode() == "AuthFailure" ||
-				ae.ErrorCode() == "InvalidClientTokenId" ||
-				ae.ErrorCode() == "ExpiredTokenException" ||
-				ae.ErrorCode() == "NoCredentialProviders") {
-			return 0, nil
-		}
-		return 0, err
-	}
-
-	if len(resp.Datapoints) == 0 {
-		return 0, nil
-	}
-
-	// Find the most recent datapoint — GetMetricStatistics doesn't guarantee
-	// ordering, so we sort by timestamp and take the latest.
-	latest := resp.Datapoints[0]
-	for _, dp := range resp.Datapoints[1:] {
-		if dp.Timestamp.After(*latest.Timestamp) {
-			latest = dp
-		}
-	}
-	return aws.ToFloat64(latest.Maximum), nil
-}
-
-// fetchTaskQueueStats returns backlog depth and sync match rate for the demo
-// task queue by calling the standard DescribeTaskQueue gRPC endpoint with
-// ReportStats: true — once for workflow tasks and once for activity tasks.
+// fetchTaskQueueStats returns backlog depth, sync match rate, and the number
+// of active Lambda worker pollers for the demo task queue. It calls the
+// standard DescribeTaskQueue gRPC endpoint with ReportStats: true — once for
+// workflow tasks and once for activity tasks.
 //
 // Using the standard (non-enhanced) DescribeTaskQueue rather than the
 // deprecated DescribeTaskQueueEnhanced is intentional: the enhanced API's
@@ -210,7 +147,11 @@ func fetchLambdaConcurrency(ctx context.Context, cwClient *cloudwatch.Client, fu
 //
 // -1 is returned when TasksAddRate is 0 so the frontend can show "—" instead
 // of 0% or 100% while the queue is idle.
-func fetchTaskQueueStats(ctx context.Context, tc client.Client) (backlog float64, syncMatchRate float64, err error) {
+//
+// Poller count: the number of active pollers on the activity task queue. Each
+// Lambda invocation registers exactly one activity-task poller, so this is a
+// real-time proxy for Lambda concurrency — far fresher than CloudWatch metrics.
+func fetchTaskQueueStats(ctx context.Context, tc client.Client) (backlog float64, syncMatchRate float64, pollerCount int, err error) {
 	namespace := os.Getenv("TEMPORAL_NAMESPACE")
 	if namespace == "" {
 		namespace = "default"
@@ -237,14 +178,15 @@ func fetchTaskQueueStats(ctx context.Context, tc client.Client) (backlog float64
 			ReportStats:   true,
 		})
 		if respErr != nil {
-			return 0, -1, respErr
+			return 0, -1, 0, respErr
 		}
 		if resp.Stats != nil {
-			log.Printf("fetchTaskQueueStats: type=%v backlog=%d addRate=%f dispatchRate=%f",
+			log.Printf("fetchTaskQueueStats: type=%v backlog=%d addRate=%f dispatchRate=%f pollers=%d",
 				tqType,
 				resp.Stats.ApproximateBacklogCount,
 				resp.Stats.TasksAddRate,
 				resp.Stats.TasksDispatchRate,
+				len(resp.Pollers),
 			)
 			totalBacklog += resp.Stats.ApproximateBacklogCount
 			totalTasksAddRate += resp.Stats.TasksAddRate
@@ -252,13 +194,19 @@ func fetchTaskQueueStats(ctx context.Context, tc client.Client) (backlog float64
 		} else {
 			log.Printf("fetchTaskQueueStats: type=%v stats nil", tqType)
 		}
+
+		// Count active Lambda invocations via activity-task pollers.
+		// Each Lambda invocation = exactly one activity-task poller connection.
+		if tqType == enumspb.TASK_QUEUE_TYPE_ACTIVITY {
+			pollerCount = len(resp.Pollers)
+		}
 	}
 
 	backlog = float64(totalBacklog)
 
 	// Can't compute a meaningful rate if no tasks have been added yet.
 	if totalTasksAddRate <= 0 {
-		return backlog, -1, nil
+		return backlog, -1, pollerCount, nil
 	}
 
 	// syncMatchRate = fraction of tasks that did NOT contribute to backlog growth.
@@ -273,5 +221,5 @@ func fetchTaskQueueStats(ctx context.Context, tc client.Client) (backlog float64
 		rate = 0.0
 	}
 
-	return backlog, rate, nil
+	return backlog, rate, pollerCount, nil
 }

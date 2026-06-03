@@ -191,14 +191,10 @@
       <input type="number" id="seed-count" class="count-input" value="30" min="1" max="200" />
       <label for="seed-count">workflows simultaneously</label>
       <button class="btn-seed" id="seed-btn" onclick="fireSeed()">
-        <i class="ti ti-bolt"></i> Fire burst
+        <i class="ti ti-bolt"></i> Flux the Capacitor!
       </button>
     </div>
     <p class="seed-msg" id="seed-msg"></p>
-    <p class="presenter-hint">
-      Use this to prime the scaling visual before the audience participation moment.
-      Toggle with <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> or add <kbd>?presenter=1</kbd> to the URL.
-    </p>
   </div>
 
   <!-- Submit card -->
@@ -527,7 +523,7 @@
   drawSyncSpark(syncSpark);
 
   fetchMetrics();
-  setInterval(fetchMetrics, 3000);
+  setInterval(fetchMetrics, 2000);
   setInterval(renderFeed,   5000);
 </script>
 </body>
