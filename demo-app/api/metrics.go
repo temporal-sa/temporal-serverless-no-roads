@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -13,6 +14,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatch"
 	cwtypes "github.com/aws/aws-sdk-go-v2/service/cloudwatch/types"
 	"github.com/aws/smithy-go"
+	enumspb "go.temporal.io/api/enums/v1"
+	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	"go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/sdk/client"
 
@@ -54,7 +57,7 @@ func MetricsHandler(
 			return
 		}
 
-		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 		defer cancel()
 
 		var (
@@ -98,7 +101,7 @@ func MetricsHandler(
 		}()
 
 		// Fan-out 3: Temporal — task queue stats (backlog depth + sync match rate).
-		// Both metrics come from a single DescribeTaskQueueEnhanced call.
+		// Uses two DescribeTaskQueue calls (workflow + activity) with ReportStats: true.
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -155,7 +158,7 @@ func fetchLambdaConcurrency(ctx context.Context, cwClient *cloudwatch.Client, fu
 				Value: aws.String(functionName),
 			},
 		},
-		StartTime:  aws.Time(now.Add(-60 * time.Second)),
+		StartTime:  aws.Time(now.Add(-5 * time.Minute)),
 		EndTime:    aws.Time(now),
 		Period:     aws.Int32(60),
 		Statistics: []cwtypes.Statistic{cwtypes.StatisticMaximum},
@@ -178,50 +181,76 @@ func fetchLambdaConcurrency(ctx context.Context, cwClient *cloudwatch.Client, fu
 		return 0, nil
 	}
 
-	// Return the most recent maximum datapoint.
-	return aws.ToFloat64(resp.Datapoints[0].Maximum), nil
+	// Find the most recent datapoint — GetMetricStatistics doesn't guarantee
+	// ordering, so we sort by timestamp and take the latest.
+	latest := resp.Datapoints[0]
+	for _, dp := range resp.Datapoints[1:] {
+		if dp.Timestamp.After(*latest.Timestamp) {
+			latest = dp
+		}
+	}
+	return aws.ToFloat64(latest.Maximum), nil
 }
 
-// fetchTaskQueueStats uses a single DescribeTaskQueueEnhanced call to return
-// both backlog depth and sync match rate.
+// fetchTaskQueueStats returns backlog depth and sync match rate for the demo
+// task queue by calling the standard DescribeTaskQueue gRPC endpoint with
+// ReportStats: true — once for workflow tasks and once for activity tasks.
 //
-// Backlog depth: sum of ApproximateBacklogCount across all version sets.
+// Using the standard (non-enhanced) DescribeTaskQueue rather than the
+// deprecated DescribeTaskQueueEnhanced is intentional: the enhanced API's
+// VersionsInfo is tied to the old Build-ID versioning model and returns empty
+// stats for workers that use the newer Worker Deployment versioning
+// (DeploymentOptions / UseVersioning: true). The standard endpoint returns
+// aggregate TaskQueueStats regardless of which versioning model the workers use.
 //
 // Sync match rate: the percentage of tasks dispatched immediately to a polling
-// worker (sync-matched) rather than persisted to the backlog first. Derived
-// from TasksAddRate and TasksDispatchRate:
+// worker (sync-matched) rather than persisted to the backlog first.
 //
-//	syncMatchRate = 1 - (BacklogIncreaseRate / TasksAddRate)
+//	syncMatchRate = 1 - ((TasksAddRate - TasksDispatchRate) / TasksAddRate)
 //
-// When TasksAddRate is 0 (no activity yet), syncMatchRate is returned as -1
-// so the frontend can show a neutral "—" rather than 0% or 100%.
-//
-// This is the primary signal Temporal uses to decide whether to invoke
-// additional Lambda instances — a falling sync match rate means tasks are
-// arriving faster than workers can consume them.
+// -1 is returned when TasksAddRate is 0 so the frontend can show "—" instead
+// of 0% or 100% while the queue is idle.
 func fetchTaskQueueStats(ctx context.Context, tc client.Client) (backlog float64, syncMatchRate float64, err error) {
-	resp, err := tc.DescribeTaskQueueEnhanced(ctx, client.DescribeTaskQueueEnhancedOptions{
-		TaskQueue:   taskqueue.DemoTaskQueue,
-		ReportStats: true,
-	})
-	if err != nil {
-		return 0, -1, err
+	namespace := os.Getenv("TEMPORAL_NAMESPACE")
+	if namespace == "" {
+		namespace = "default"
+	}
+
+	tqTypes := []enumspb.TaskQueueType{
+		enumspb.TASK_QUEUE_TYPE_WORKFLOW,
+		enumspb.TASK_QUEUE_TYPE_ACTIVITY,
 	}
 
 	var (
-		totalBacklog          int64
-		totalTasksAddRate     float32
-		totalBacklogIncRate   float32
+		totalBacklog           int64
+		totalTasksAddRate      float32
+		totalTasksDispatchRate float32
 	)
 
-	for _, versionInfo := range resp.VersionsInfo {
-		for _, typeInfo := range versionInfo.TypesInfo {
-			if typeInfo.Stats == nil {
-				continue
-			}
-			totalBacklog += typeInfo.Stats.ApproximateBacklogCount
-			totalTasksAddRate += typeInfo.Stats.TasksAddRate
-			totalBacklogIncRate += typeInfo.Stats.BacklogIncreaseRate
+	for _, tqType := range tqTypes {
+		resp, respErr := tc.WorkflowService().DescribeTaskQueue(ctx, &workflowservice.DescribeTaskQueueRequest{
+			Namespace: namespace,
+			TaskQueue: &taskqueuepb.TaskQueue{
+				Name: taskqueue.DemoTaskQueue,
+			},
+			TaskQueueType: tqType,
+			ReportStats:   true,
+		})
+		if respErr != nil {
+			return 0, -1, respErr
+		}
+		if resp.Stats != nil {
+			log.Printf("fetchTaskQueueStats: type=%v backlog=%d addRate=%f dispatchRate=%f",
+				tqType,
+				resp.Stats.ApproximateBacklogCount,
+				resp.Stats.TasksAddRate,
+				resp.Stats.TasksDispatchRate,
+			)
+			totalBacklog += resp.Stats.ApproximateBacklogCount
+			totalTasksAddRate += resp.Stats.TasksAddRate
+			totalTasksDispatchRate += resp.Stats.TasksDispatchRate
+		} else {
+			log.Printf("fetchTaskQueueStats: type=%v stats nil", tqType)
 		}
 	}
 
@@ -233,7 +262,9 @@ func fetchTaskQueueStats(ctx context.Context, tc client.Client) (backlog float64
 	}
 
 	// syncMatchRate = fraction of tasks that did NOT contribute to backlog growth.
+	// BacklogIncreaseRate = TasksAddRate - TasksDispatchRate
 	// Clamp to [0, 100] to guard against transient metric noise.
+	totalBacklogIncRate := totalTasksAddRate - totalTasksDispatchRate
 	rate := (1.0 - float64(totalBacklogIncRate)/float64(totalTasksAddRate)) * 100.0
 	if rate > 100.0 {
 		rate = 100.0

@@ -44,13 +44,18 @@ func main() {
 
 	lambdaworker.RunWorker(
 		worker.WorkerDeploymentVersion{
-			DeploymentName: "serverless-webinar",
-			BuildID:        "1.0.0",
+			DeploymentName: taskqueue.DemoTaskQueue,
+			BuildID:        taskqueue.DemoBuildID,
 		},
 		func(opts *lambdaworker.Options) error {
 			opts.TaskQueue = taskqueue.DemoTaskQueue
 			opts.WorkerOptions.MaxConcurrentActivityExecutionSize = cfg.MaxConcurrentActivityExecutionSize
 			opts.WorkerOptions.MaxConcurrentWorkflowTaskExecutionSize = cfg.MaxConcurrentWorkflowTaskExecutionSize
+			// Disable eager activity dispatch so activity tasks flow through the
+			// task queue rather than being handed directly to the completing worker.
+			// Without this, TasksAddRate stays zero because tasks never touch the
+			// queue — making backlog and sync match rate metrics invisible.
+			opts.WorkerOptions.DisableEagerActivities = true
 
 			// Opt the worker into deployment-based versioning. Without
 			// UseVersioning: true, Temporal won't route versioned tasks here.

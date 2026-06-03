@@ -29,14 +29,15 @@ func main() {
 	w := worker.New(c, taskqueue.DemoTaskQueue, worker.Options{
 		MaxConcurrentActivityExecutionSize:     cfg.MaxConcurrentActivityExecutionSize,
 		MaxConcurrentWorkflowTaskExecutionSize: cfg.MaxConcurrentWorkflowTaskExecutionSize,
+		DisableEagerActivities:                 true,
 		// Match the versioning config used by the Lambda worker so local dev
 		// behaviour is consistent with production.
 		DeploymentOptions: worker.DeploymentOptions{
 			UseVersioning:             true,
 			DefaultVersioningBehavior: workflow.VersioningBehaviorPinned,
 			Version: worker.WorkerDeploymentVersion{
-				DeploymentName: "serverless-webinar",
-				BuildID:        "1.0.0",
+				DeploymentName: taskqueue.DemoTaskQueue,
+				BuildID:        taskqueue.DemoBuildID,
 			},
 		},
 	})

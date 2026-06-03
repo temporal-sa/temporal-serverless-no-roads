@@ -348,7 +348,7 @@ The demo app reads `TEMPORAL_ADDRESS`, `TEMPORAL_NAMESPACE`, and
 `workerconfig.BuildClientOptions()`). Store them in a k8s Secret:
 
 ```bash
-kubectl create secret generic temporal/serverless-worker \
+kubectl create secret generic temporal-serverless-webinar \
   --from-literal=serverless-webinar-temporal-address='<your-namespace>.<account-id>.tmprl.cloud:7233' \
   --from-literal=serverless-webinar-temporal-namespace='<your-namespace>.<account-id>' \
   --from-literal=serverless-webinar-temporal-api-key='<your-temporal-api-key>'
@@ -419,16 +419,8 @@ kubectl apply -f demo-app/k8s/
 Check rollout status:
 
 ```bash
-kubectl rollout status deployment/demo-app
+kubectl rollout status deployment/serverless-webinar-app
 ```
-
-Get the ALB URL once the ingress is provisioned (may take a minute):
-
-```bash
-kubectl get ingress demo-app
-```
-
-The demo app will be available at the `ADDRESS` shown in that output.
 
 ---
 

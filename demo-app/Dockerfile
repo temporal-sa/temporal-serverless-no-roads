@@ -1,4 +1,4 @@
-FROM golang:1.24-alpine AS builder
+FROM --platform=linux/amd64 golang:1.24-alpine AS builder
 
 WORKDIR /build
 
@@ -11,7 +11,7 @@ COPY demo-app/ .
 RUN go build -o demo-app .
 
 # --- Final image ---
-FROM alpine:3.19
+FROM --platform=linux/amd64 alpine:3.19
 
 WORKDIR /app
 

@@ -28,17 +28,17 @@ spec:
             - name: TEMPORAL_ADDRESS
               valueFrom:
                 secretKeyRef:
-                  name: temporal/serverless-webinar
+                  name: temporal-serverless-webinar
                   key: serverless-webinar-temporal-address
             - name: TEMPORAL_NAMESPACE
               valueFrom:
                 secretKeyRef:
-                  name: temporal/serverless-webinar
+                  name: temporal-serverless-webinar
                   key: serverless-webinar-temporal-namespace
             - name: TEMPORAL_API_KEY
               valueFrom:
                 secretKeyRef:
-                  name: temporal/serverless-webinar
+                  name: temporal-serverless-webinar
                   key: serverless-webinar-temporal-api-key
           resources:
             requests:

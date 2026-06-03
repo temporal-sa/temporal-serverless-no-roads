@@ -1,0 +1,14 @@
+apiVersion: traefik.containo.us/v1alpha1
+kind: IngressRoute
+metadata:
+  name: serverless-webinar-app-ingressroute
+  namespace: serverless-webinar
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: Host(`your.url`)
+      kind: Rule
+      services:
+        - name: serverless-webinar-app
+          port: 80
