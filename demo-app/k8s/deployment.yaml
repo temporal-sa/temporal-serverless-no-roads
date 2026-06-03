@@ -27,17 +27,17 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: temporal/serverless-webinar
-                  key: address
+                  key: serverless-webinar-temporal-address
             - name: TEMPORAL_NAMESPACE
               valueFrom:
                 secretKeyRef:
                   name: temporal/serverless-webinar
-                  key: namespace
+                  key: serverless-webinar-temporal-namespace
             - name: TEMPORAL_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: temporal/serverless-webinar
-                  key: api-key
+                  key: serverless-webinar-temporal-api-key
           resources:
             requests:
               cpu: "100m"
