@@ -1,22 +1,22 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: demo-app
+  name: serverless-webinar-app
   labels:
-    app: demo-app
+    app: serverless-webinar-app
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: demo-app
+      app: serverless-webinar-app
   template:
     metadata:
       labels:
-        app: demo-app
+        app: serverless-webinar-app
     spec:
-      serviceAccountName: demo-app  # IRSA — annotated in service.yaml
+      serviceAccountName: serverless-webinar-app  # IRSA — annotated in service.yaml
       containers:
-        - name: demo-app
+        - name: serverless-webinar-app
           image: <your-account>.dkr.ecr.<region>.amazonaws.com/serverless-webinar-app:latest
           ports:
             - containerPort: 8080

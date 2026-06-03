@@ -348,10 +348,10 @@ The demo app reads `TEMPORAL_ADDRESS`, `TEMPORAL_NAMESPACE`, and
 `workerconfig.BuildClientOptions()`). Store them in a k8s Secret:
 
 ```bash
-kubectl create secret generic temporal-credentials \
-  --from-literal=address='<your-namespace>.<account-id>.tmprl.cloud:7233' \
-  --from-literal=namespace='<your-namespace>.<account-id>' \
-  --from-literal=api-key='<your-temporal-api-key>'
+kubectl create secret generic temporal/serverless-worker \
+  --from-literal=serverless-webinar-temporal-address='<your-namespace>.<account-id>.tmprl.cloud:7233' \
+  --from-literal=serverless-webinar-temporal-namespace='<your-namespace>.<account-id>' \
+  --from-literal=serverless-webinar-temporal-api-key='<your-temporal-api-key>'
 ```
 
 ### 3. Create the IRSA role for CloudWatch access
@@ -363,7 +363,7 @@ annotated for IRSA (IAM Roles for Service Accounts) that grants
 ```bash
 # Replace <oidc-provider> with your EKS cluster's OIDC provider URL
 aws iam create-role \
-  --role-name demo-app-cloudwatch-role \
+  --role-name serverless-webinar-app-cloudwatch-role \
   --assume-role-policy-document '{
     "Version": "2012-10-17",
     "Statement": [{
@@ -380,7 +380,7 @@ aws iam create-role \
   --profile <your-profile>
 
 aws iam put-role-policy \
-  --role-name demo-app-cloudwatch-role \
+  --role-name serverless-webinar-app-cloudwatch-role \
   --policy-name CloudWatchGetMetrics \
   --policy-document '{
     "Version": "2012-10-17",
@@ -399,12 +399,12 @@ Two placeholders need filling in before you apply:
 
 **`demo-app/k8s/deployment.yaml`** — replace the ECR image URI:
 ```yaml
-image: <your-aws-account-id>.dkr.ecr.us-east-1.amazonaws.com/serverless-webinar-app:latest
+image: <your-aws-account-id>.dkr.ecr.<your-region>.amazonaws.com/serverless-webinar-app:latest
 ```
 
 **`demo-app/k8s/service.yaml`** — replace the IRSA role ARN:
 ```yaml
-eks.amazonaws.com/role-arn: arn:aws:iam::<your-aws-account-id>:role/demo-app-cloudwatch-role
+eks.amazonaws.com/role-arn: arn:aws:iam::<your-aws-account-id>:role/serverless-webinar-app-cloudwatch-role
 ```
 
 All other values (`LAMBDA_FUNCTION_NAME`, secret key names, container port) are
