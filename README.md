@@ -36,6 +36,12 @@ temporal-serverless-no-roads/
 
 ---
 
+## Metrics
+
+See **[METRICS.md](./METRICS.md)** for a full breakdown of where each UI metric comes from, which Temporal API backs it, and the end-to-end lag from a real-world event to the number changing on screen.
+
+---
+
 ## Running locally
 
 Local dev uses the Temporal CLI dev server in place of Temporal Cloud, and a
@@ -103,12 +109,8 @@ WORKER_MAX_CONCURRENT_ACTIVITIES=2 go run ./localworker/main.go
 
 ```bash
 cd demo-app
-LAMBDA_FUNCTION_NAME=local go run .
+go run .
 ```
-
-`LAMBDA_FUNCTION_NAME` is required by the metrics handler — set it to any
-non-empty string locally. CloudWatch calls degrade gracefully to `0` without
-AWS credentials.
 
 The demo app is available at [http://localhost:8080](http://localhost:8080).
 
@@ -131,7 +133,7 @@ Or activate presenter mode in the UI (`?presenter=1` in the URL, or
 |---|---|---|
 | 1 | `temporal server start-dev` | Local Temporal cluster + Web UI |
 | 2 | `cd demo-app && go run ./localworker/main.go` | Long-polling worker |
-| 3 | `cd demo-app && LAMBDA_FUNCTION_NAME=local go run .` | Demo app server |
+| 3 | `cd demo-app && go run .` | Demo app server |
 
 ---
 
@@ -354,63 +356,18 @@ kubectl create secret generic temporal-serverless-webinar \
   --from-literal=serverless-webinar-temporal-api-key='<your-temporal-api-key>'
 ```
 
-### 3. Create the IRSA role for CloudWatch access
+### 3. Update the k8s manifests
 
-The demo app polls CloudWatch for Lambda concurrency metrics. Create an IAM role
-annotated for IRSA (IAM Roles for Service Accounts) that grants
-`cloudwatch:GetMetricStatistics`:
-
-```bash
-# Replace <oidc-provider> with your EKS cluster's OIDC provider URL
-aws iam create-role \
-  --role-name serverless-webinar-app-cloudwatch-role \
-  --assume-role-policy-document '{
-    "Version": "2012-10-17",
-    "Statement": [{
-      "Effect": "Allow",
-      "Principal": { "Federated": "arn:aws:iam::<your-aws-account-id>:oidc-provider/<oidc-provider>" },
-      "Action": "sts:AssumeRoleWithWebIdentity",
-      "Condition": {
-        "StringEquals": {
-          "<oidc-provider>:sub": "system:serviceaccount:default:demo-app"
-        }
-      }
-    }]
-  }' \
-  --profile <your-profile>
-
-aws iam put-role-policy \
-  --role-name serverless-webinar-app-cloudwatch-role \
-  --policy-name CloudWatchGetMetrics \
-  --policy-document '{
-    "Version": "2012-10-17",
-    "Statement": [{
-      "Effect": "Allow",
-      "Action": "cloudwatch:GetMetricStatistics",
-      "Resource": "*"
-    }]
-  }' \
-  --profile <your-profile>
-```
-
-### 4. Update the k8s manifests
-
-Two placeholders need filling in before you apply:
+One placeholder needs filling in before you apply:
 
 **`demo-app/k8s/deployment.yaml`** — replace the ECR image URI:
 ```yaml
 image: <your-aws-account-id>.dkr.ecr.<your-region>.amazonaws.com/serverless-webinar-app:latest
 ```
 
-**`demo-app/k8s/service.yaml`** — replace the IRSA role ARN:
-```yaml
-eks.amazonaws.com/role-arn: arn:aws:iam::<your-aws-account-id>:role/serverless-webinar-app-cloudwatch-role
-```
+All other values (secret key names, container port) are already correct.
 
-All other values (`LAMBDA_FUNCTION_NAME`, secret key names, container port) are
-already correct.
-
-### 5. Apply
+### 4. Apply
 
 ```bash
 kubectl apply -f demo-app/k8s/
@@ -458,7 +415,6 @@ in the deployment zip.
 
 | Variable | Required | Description |
 |---|---|---|
-| `LAMBDA_FUNCTION_NAME` | Yes | Lambda function name for CloudWatch metrics lookup |
 | `TEMPORAL_ADDRESS` | No | Temporal server address (default: `localhost:7233`) |
 | `TEMPORAL_NAMESPACE` | No | Temporal namespace (default: `default`) |
 | `TEMPORAL_API_KEY` | No | Temporal Cloud API key |
