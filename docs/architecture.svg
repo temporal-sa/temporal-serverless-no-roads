@@ -1,0 +1,124 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="680" height="620" viewBox="0 0 680 620" role="img" style="background:#000;border-radius:12px;">
+  <title>Serverless webinar demo architecture</title>
+  <desc>Architecture diagram showing the demo app on EKS routing workflows through Temporal Cloud to Lambda workers</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+    <style>
+      text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .th  { font-size: 14px; font-weight: 500; fill: #E8EEF6; }
+      .ts  { font-size: 12px; font-weight: 400; fill: #9095A8; }
+      .teal-rect   { fill: #085041; stroke: #1AC98E; }
+      .purple-rect { fill: #3C3489; stroke: #7F77DD; }
+      .blue-rect   { fill: #0C447C; stroke: #378ADD; }
+      .amber-rect  { fill: #633806; stroke: #BA7517; }
+      .gray-rect   { fill: #444441; stroke: #888780; }
+      .teal-th  { fill: #9FE1CB; }
+      .teal-ts  { fill: #5DCAA5; }
+      .purple-th { fill: #CECBF6; }
+      .purple-ts { fill: #AFA9EC; }
+      .blue-th  { fill: #B5D4F4; }
+      .blue-ts  { fill: #85B7EB; }
+      .amber-th { fill: #FAC775; }
+      .amber-ts { fill: #EF9F27; }
+      .gray-th  { fill: #D3D1C7; }
+      .gray-ts  { fill: #B4B2A9; }
+    </style>
+  </defs>
+
+  <!-- Zone borders -->
+  <rect x="40" y="30" width="180" height="82" rx="10" fill="none" stroke="#333" stroke-width="0.5" stroke-dasharray="5 3"/>
+  <text class="ts" x="130" y="50" text-anchor="middle" fill="#555">Audience browser</text>
+
+  <rect x="40" y="152" width="280" height="200" rx="10" fill="none" stroke="#333" stroke-width="0.5" stroke-dasharray="5 3"/>
+  <text class="ts" x="180" y="170" text-anchor="middle" fill="#555">EKS · us-west-1</text>
+
+  <rect x="40" y="392" width="600" height="168" rx="10" fill="none" stroke="#333" stroke-width="0.5" stroke-dasharray="5 3"/>
+  <text class="ts" x="340" y="412" text-anchor="middle" fill="#555">Temporal Cloud</text>
+
+  <rect x="360" y="152" width="280" height="210" rx="10" fill="none" stroke="#333" stroke-width="0.5" stroke-dasharray="5 3"/>
+  <text class="ts" x="500" y="172" text-anchor="middle" fill="#555">AWS Lambda · us-east-1</text>
+
+  <!-- Demo UI -->
+  <rect x="58" y="58" width="144" height="44" rx="6" class="teal-rect" stroke-width="0.5"/>
+  <text class="th teal-th" x="130" y="76" text-anchor="middle" dominant-baseline="central">Demo UI</text>
+  <text class="ts teal-ts" x="130" y="93" text-anchor="middle" dominant-baseline="central">serverless-webinar.tmprl-demo.cloud</text>
+
+  <!-- Demo app server -->
+  <rect x="58" y="180" width="244" height="36" rx="6" class="teal-rect" stroke-width="0.5"/>
+  <text class="th teal-th" x="180" y="194" text-anchor="middle" dominant-baseline="central">Demo app server</text>
+  <text class="ts teal-ts" x="180" y="210" text-anchor="middle" dominant-baseline="central">UI · /api/submit · /api/metrics · /api/seed</text>
+
+  <!-- Submit handler -->
+  <rect x="58" y="230" width="114" height="42" rx="6" class="purple-rect" stroke-width="0.5"/>
+  <text class="th purple-th" x="115" y="246" text-anchor="middle" dominant-baseline="central">Submit handler</text>
+  <text class="ts purple-ts" x="115" y="263" text-anchor="middle" dominant-baseline="central">StartWorkflow</text>
+
+  <!-- Metrics handler -->
+  <rect x="188" y="230" width="114" height="42" rx="6" class="purple-rect" stroke-width="0.5"/>
+  <text class="th purple-th" x="245" y="246" text-anchor="middle" dominant-baseline="central">Metrics handler</text>
+  <text class="ts purple-ts" x="245" y="263" text-anchor="middle" dominant-baseline="central">CountWorkflow · stats</text>
+
+  <!-- SDK client -->
+  <rect x="58" y="286" width="244" height="36" rx="6" class="blue-rect" stroke-width="0.5"/>
+  <text class="th blue-th" x="180" y="300" text-anchor="middle" dominant-baseline="central">Temporal Go SDK client</text>
+  <text class="ts blue-ts" x="180" y="317" text-anchor="middle" dominant-baseline="central">API key auth · gRPC</text>
+
+  <!-- Frontend service -->
+  <rect x="58" y="422" width="158" height="42" rx="6" class="blue-rect" stroke-width="0.5"/>
+  <text class="th blue-th" x="137" y="438" text-anchor="middle" dominant-baseline="central">Frontend service</text>
+  <text class="ts blue-ts" x="137" y="455" text-anchor="middle" dominant-baseline="central">Workflow routing · gRPC</text>
+
+  <!-- Task queue -->
+  <rect x="236" y="422" width="168" height="42" rx="6" class="blue-rect" stroke-width="0.5"/>
+  <text class="th blue-th" x="320" y="438" text-anchor="middle" dominant-baseline="central">Task queue</text>
+  <text class="ts blue-ts" x="320" y="455" text-anchor="middle" dominant-baseline="central">serverless-webinar · 1.0.0</text>
+
+  <!-- WCI scaler -->
+  <rect x="424" y="422" width="196" height="42" rx="6" class="amber-rect" stroke-width="0.5"/>
+  <text class="th amber-th" x="522" y="438" text-anchor="middle" dominant-baseline="central">WCI scaler</text>
+  <text class="ts amber-ts" x="522" y="455" text-anchor="middle" dominant-baseline="central">Monitors backlog · invokes Lambda</text>
+
+  <!-- History / Matching -->
+  <rect x="140" y="480" width="360" height="60" rx="6" class="blue-rect" stroke-width="0.5"/>
+  <text class="th blue-th" x="320" y="502" text-anchor="middle" dominant-baseline="central">Workflow history · Matching service</text>
+  <text class="ts blue-ts" x="320" y="522" text-anchor="middle" dominant-baseline="central">Durable state · task dispatch · versioning</text>
+
+  <!-- Lambda worker outer -->
+  <rect x="376" y="184" width="248" height="164" rx="8" class="amber-rect" stroke-width="0.5"/>
+  <text class="th amber-th" x="500" y="202" text-anchor="middle" dominant-baseline="central">Lambda worker</text>
+  <text class="ts amber-ts" x="500" y="219" text-anchor="middle" dominant-baseline="central">Go · lambdaworker.RunWorker</text>
+
+  <!-- DemoWorkflow -->
+  <rect x="392" y="230" width="216" height="48" rx="6" class="gray-rect" stroke-width="0.5"/>
+  <text class="th gray-th" x="500" y="248" text-anchor="middle" dominant-baseline="central">DemoWorkflow</text>
+  <text class="ts gray-ts" x="500" y="265" text-anchor="middle" dominant-baseline="central">ProcessSubmission · SimulateWork x3</text>
+
+  <!-- Deployment version -->
+  <rect x="392" y="294" width="216" height="36" rx="6" class="gray-rect" stroke-width="0.5"/>
+  <text class="th gray-th" x="500" y="308" text-anchor="middle" dominant-baseline="central">Deployment version</text>
+  <text class="ts gray-ts" x="500" y="325" text-anchor="middle" dominant-baseline="central">serverless-webinar · build 1.0.0</text>
+
+  <!-- Arrows -->
+  <line x1="130" y1="102" x2="130" y2="180" stroke="#555" stroke-width="1" fill="none" marker-end="url(#arrow)"/>
+  <text class="ts" x="136" y="144" fill="#555">HTTPS</text>
+
+  <line x1="140" y1="216" x2="115" y2="230" stroke="#444" stroke-width="0.5" fill="none" marker-end="url(#arrow)"/>
+  <line x1="220" y1="216" x2="245" y2="230" stroke="#444" stroke-width="0.5" fill="none" marker-end="url(#arrow)"/>
+  <line x1="115" y1="272" x2="140" y2="286" stroke="#444" stroke-width="0.5" fill="none" marker-end="url(#arrow)"/>
+  <line x1="245" y1="272" x2="220" y2="286" stroke="#444" stroke-width="0.5" fill="none" marker-end="url(#arrow)"/>
+
+  <path d="M180 322 L137 422" fill="none" stroke="#555" stroke-width="1" marker-end="url(#arrow)"/>
+  <line x1="216" y1="443" x2="236" y2="443" stroke="#555" stroke-width="1" fill="none" marker-end="url(#arrow)"/>
+  <line x1="404" y1="443" x2="424" y2="443" stroke="#555" stroke-width="1" fill="none" marker-end="url(#arrow)"/>
+
+  <path d="M522 422 L500 348" fill="none" stroke="#BA7517" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#arrow)"/>
+  <text class="ts" x="532" y="388" fill="#BA7517">invoke</text>
+
+  <path d="M376 312 Q300 362 320 422" fill="none" stroke="#555" stroke-width="1" stroke-dasharray="4 3" marker-end="url(#arrow)"/>
+  <text class="ts" x="290" y="370" text-anchor="middle" fill="#555">polls</text>
+
+  <line x1="137" y1="464" x2="200" y2="480" stroke="#444" stroke-width="0.5" fill="none" marker-end="url(#arrow)"/>
+  <line x1="320" y1="464" x2="320" y2="480" stroke="#444" stroke-width="0.5" fill="none" marker-end="url(#arrow)"/>
+</svg>

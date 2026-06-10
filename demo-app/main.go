@@ -11,7 +11,6 @@ import (
 
 	"github.com/temporalio/temporal-serverless-no-roads/demo-app/api"
 	"github.com/temporalio/temporal-serverless-no-roads/demo-app/cache"
-	"github.com/temporalio/temporal-serverless-no-roads/demo-app/middleware"
 	"github.com/temporalio/temporal-serverless-no-roads/shared/workerconfig"
 )
 
@@ -38,10 +37,8 @@ func main() {
 	// --- Routes ---
 	mux := http.NewServeMux()
 
-	// Audience submission — rate limited per IP
-	mux.Handle("/api/submit", middleware.RateLimit(
-		http.HandlerFunc(api.SubmitHandler(temporalClient)),
-	))
+	// Audience submission
+	mux.HandleFunc("/api/submit", api.SubmitHandler(temporalClient))
 
 	// Presenter burst seeding — no rate limit, presenter use only
 	// POST /api/seed          → starts 30 workflows

@@ -1,6 +1,6 @@
 # temporal-serverless-no-roads
 
-> *We Don't Need Workers Where We're Going*
+> *Where we're going, we don't NEED workers!*
 
 A live audience-participation demo for Temporal's Serverless Workers feature. Attendees submit their name via a web UI to trigger real workflow executions, and watch Lambda invocations, task queue backlog, and workflow counts update in real time.
 
@@ -30,9 +30,19 @@ temporal-serverless-no-roads/
 └── README.md
 ```
 
-> Note: `cfn/temporal-invoke-role.yaml` has been removed. The Temporal Cloud UI
-> provides its own CloudFormation template for the invocation role as part of
-> the worker deployment creation flow (Step 5).
+
+## Architecture
+
+![Demo architecture](docs/architecture.svg)
+
+Audience browsers submit their name via the demo UI, which is served by the
+demo app running on EKS. The submit handler starts a `DemoWorkflow` via the
+Temporal Go SDK client. Temporal Cloud receives it, routes it to the
+`serverless-webinar` task queue, and the WCI scaler monitors backlog depth —
+invoking the Lambda worker when tasks need processing. The Lambda worker polls
+the task queue, executes `DemoWorkflow` (three chained `SimulateWork`
+activities with built in delays to show execution over time), and exits when idle. The metrics handler polls Temporal Cloud for
+workflow counts and task queue stats to drive the live dashboard.
 
 ---
 
@@ -124,8 +134,7 @@ visible backlog and sync match rate pressure, fire a seed burst:
 curl -X POST http://localhost:8080/api/seed?count=30
 ```
 
-Or activate presenter mode in the UI (`?presenter=1` in the URL, or
-`Ctrl+Shift+P`) and use the Fire Burst button.
+Or activate presenter mode in the UI at `?presenter=1` in the URL.
 
 ### Local environment summary
 
@@ -142,13 +151,12 @@ Or activate presenter mode in the UI (`?presenter=1` in the URL, or
 This section covers the complete end-to-end process for deploying the Lambda
 worker to the SA AWS account and connecting it to Temporal Cloud.
 
-> **Namespace auth requirement:** your Temporal Cloud namespace must be
-> configured for **API key authentication**. mTLS and API key auth are mutually
-> exclusive per namespace in Temporal Cloud — you cannot mix them.
+> **Namespace auth requirement:** This repo assumes that your Temporal Cloud namespace is
+> configured for **API key authentication**.
 
 ### Prerequisites
 
-- A Temporal Cloud namespace with mTLS client cert and key. Download them from
+- A Temporal Cloud namespace with API key. Download them from
   the Temporal Cloud UI under your
   namespace → **API Keys**.
 
@@ -163,7 +171,7 @@ visible in plain text as an environment variable.
 aws secretsmanager create-secret \
   --name temporal/serverless-webinar/api-key \
   --secret-string "<your-temporal-api-key>" \
-  --region us-east-1 \
+  --region <your-region> \
   --profile <your-profile>
 ```
 
@@ -209,30 +217,16 @@ Set the Temporal connection config and credentials on the deployed function. Use
 Option A or Option B for the API key depending on what you chose in Step 1.
 
 ```bash
-# Option A: API key stored directly as an env var (simpler, fine for demos)
 aws lambda update-function-configuration \
   --function-name serverless-webinar-worker \
   --environment "Variables={
     TEMPORAL_ADDRESS=<your-namespace>.<account-id>.tmprl.cloud:7233,
     TEMPORAL_NAMESPACE=<your-namespace>.<account-id>,
-    TEMPORAL_API_KEY=<your-temporal-api-key>,
+    TEMPORAL_API_KEY_SECRET_ARN=arn:aws:secretsmanager:<your-region>:<your-aws-account-id>:secret:temporal/serverless-webinar/api-key-<suffix>,
     WORKER_MAX_CONCURRENT_ACTIVITIES=5,
     WORKER_MAX_CONCURRENT_WORKFLOWS=5
   }" \
-  --region us-east-1 \
-  --profile <your-profile>
-
-# Option B: API key fetched from Secrets Manager at cold start (recommended)
-aws lambda update-function-configuration \
-  --function-name serverless-webinar-worker \
-  --environment "Variables={
-    TEMPORAL_ADDRESS=<your-namespace>.<account-id>.tmprl.cloud:7233,
-    TEMPORAL_NAMESPACE=<your-namespace>.<account-id>,
-    TEMPORAL_API_KEY_SECRET_ARN=arn:aws:secretsmanager:us-east-1:<your-aws-account-id>:secret:temporal/serverless-webinar/api-key-<suffix>,
-    WORKER_MAX_CONCURRENT_ACTIVITIES=5,
-    WORKER_MAX_CONCURRENT_WORKFLOWS=5
-  }" \
-  --region us-east-1 \
+  --region <your-region> \
   --profile <your-profile>
 ```
 
@@ -260,7 +254,7 @@ Temporal and creates the IAM role Temporal uses to invoke it.
        --stack-name temporal-webinar-invoke-role \
        --template-file <downloaded-template.yaml> \
        --capabilities CAPABILITY_NAMED_IAM \
-       --region us-east-1 \
+       --region <your-region> \
        --profile <your-profile>
      ```
    - Note the **IAM Role ARN** from the stack outputs
@@ -333,14 +327,14 @@ aws ecr get-login-password \
   --region us-east-1 \
   --profile <your-profile> \
   | docker login --username AWS --password-stdin \
-    <your-aws-account-id>.dkr.ecr.us-east-1.amazonaws.com
+    <your-aws-account-id>.dkr.ecr.<your-region>.amazonaws.com
 
 # Build from the repo root (Dockerfile references ../shared)
 docker build \
-  -t <your-aws-account-id>.dkr.ecr.us-east-1.amazonaws.com/serverless-webinar-app:latest \
+  -t <your-aws-account-id>.dkr.ecr.<your-region>.amazonaws.com/serverless-webinar-app:latest \
   -f demo-app/Dockerfile .
 
-docker push <your-aws-account-id>.dkr.ecr.us-east-1.amazonaws.com/serverless-webinar-app:latest
+docker push <your-aws-account-id>.dkr.ecr.<your-region>.amazonaws.com/serverless-webinar-app:latest
 ```
 
 ### 2. Create the Temporal credentials Secret
@@ -356,7 +350,7 @@ kubectl create secret generic temporal-serverless-webinar \
   --from-literal=serverless-webinar-temporal-api-key='<your-temporal-api-key>'
 ```
 
-### 3. Update the k8s manifests
+### 4. Update the k8s manifests
 
 One placeholder needs filling in before you apply:
 
@@ -367,17 +361,32 @@ image: <your-aws-account-id>.dkr.ecr.<your-region>.amazonaws.com/serverless-webi
 
 All other values (secret key names, container port) are already correct.
 
-### 4. Apply
+> Note: This is set up for an EKS cluster using Traefik + a cert for https, and as such includes `ingressroute.yaml` and `certficiate.yaml`. The ALB forwards all traffic to Traefik which routes based on the `Host` header to your service.
+
+### 5. Apply
 
 ```bash
-kubectl apply -f demo-app/k8s/
+kubectl apply -f demo-app/k8s/certificate.yaml -n serverless-webinar
+kubectl apply -f demo-app/k8s/service.yaml -n serverless-webinar
+kubectl apply -f demo-app/k8s/deployment.yaml -n serverless-webinar
+kubectl apply -f demo-app/k8s/ingressroute.yaml -n serverless-webinar
 ```
 
-Check rollout status:
+Wait for the TLS certificate to be issued by cert-manager before testing the URL
+— this typically takes 30–60 seconds:
 
 ```bash
-kubectl rollout status deployment/serverless-webinar-app
+kubectl get certificate -n serverless-webinar -w
 ```
+
+Wait for `READY` to show `True`, then check rollout status:
+
+```bash
+kubectl rollout status deployment/serverless-webinar-app -n serverless-webinar
+```
+
+The demo app will be available at the hostname configured in `ingressroute.yaml`
+(currently `https://serverless-webinar.tmprl-demo.cloud`).
 
 ---
 
@@ -386,9 +395,7 @@ kubectl rollout status deployment/serverless-webinar-app
 The UI has a hidden presenter panel for triggering workflow bursts during the
 live demo. Not visible to the audience by default.
 
-**Activate** by either:
-- Adding `?presenter=1` to the URL before screen sharing
-- Pressing `Ctrl+Shift+P` at any time to toggle
+**Activate** by adding `?presenter=1` to the URL before screen sharing
 
 The panel fires N workflows simultaneously (default 30, max 200) to prime the
 scaling visuals before or during the audience participation moment.
@@ -436,7 +443,7 @@ To update the values on the deployed Lambda:
 aws lambda update-function-configuration \
   --function-name serverless-webinar-worker \
   --environment "Variables={WORKER_MAX_CONCURRENT_ACTIVITIES=5,WORKER_MAX_CONCURRENT_WORKFLOWS=5}" \
-  --region us-east-1 \
+  --region <your-region> \
   --profile <your-profile>
 ```
 

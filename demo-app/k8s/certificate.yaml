@@ -1,0 +1,12 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: serverless-webinar-tls
+  namespace: serverless-webinar
+spec:
+  secretName: tmprl-demo-cloud-server-tls
+  dnsNames:
+    - serverless-webinar.tmprl-demo.cloud
+  issuerRef:
+    name: letsencrypt
+    kind: ClusterIssuer

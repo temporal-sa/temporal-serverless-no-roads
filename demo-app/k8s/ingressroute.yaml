@@ -5,10 +5,12 @@ metadata:
   namespace: serverless-webinar
 spec:
   entryPoints:
-    - web
+    - websecure
   routes:
-    - match: Host(`your.url`)
+    - match: Host(`serverless-webinar.tmprl-demo.cloud`)
       kind: Rule
       services:
         - name: serverless-webinar-app
           port: 80
+  tls:
+    secretName: tmprl-demo-cloud-server-tls
